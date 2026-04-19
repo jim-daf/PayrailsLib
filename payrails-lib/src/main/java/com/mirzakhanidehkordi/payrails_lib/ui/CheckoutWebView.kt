@@ -1,12 +1,14 @@
 package com.mirzakhanidehkordi.payrails_lib.ui
 
-import android.graphics.Bitmap
+import android.annotation.SuppressLint
 import android.net.Uri
+import android.net.http.SslError
+import android.webkit.SslErrorHandler
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.viewinterop.AndroidView
-import android.annotation.SuppressLint
 
 /**
  * A Composable function that displays a WebView for handling checkout processes.
@@ -34,42 +36,45 @@ fun CheckoutWebView(
             settings.domStorageEnabled = true // Often needed for modern web apps
             settings.setSupportMultipleWindows(true) // If redirects open new windows
 
-            // Optional: Enable debug for WebView (for testing only, remove in prod)
-            // WebView.setWebContentsDebuggingEnabled(true)
+            // Security hardening: disable file and content access (not needed for checkout)
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+
+            // Security hardening: block mixed content (HTTP resources on HTTPS pages)
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
 
             webViewClient = object : WebViewClient() {
                 /**
                  * Intercept URL loading. This is the primary way to handle redirects.
+                 * Implements URL scheme whitelisting to block dangerous schemes.
                  */
                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                     url?.let {
-                        val uri = Uri.parse(it)
-                        // This is a more robust way to handle callbacks:
-                        // 1. Using specific redirect URLs provided by Payrails or your own backend.
-                        // 2. Potentially using deep links/custom schemes like "yourapp://payrails/success"
+                        // Check for success/failure redirect URLs first
                         if (it.startsWith(successRedirectUrl)) {
                             onComplete()
-                            return true // Indicate that we handled the URL
+                            return true
                         } else if (it.startsWith(failureRedirectUrl)) {
                             onError("Payment failed or cancelled.")
-                            return true // Indicate that we handled the URL
+                            return true
                         }
-                        // Add more specific handling if Payrails provides other redirect types
-                        // For example, if it's a 3DS redirect, you might want to let the WebView load it.
+
+                        // URL scheme whitelisting: only allow https:// navigation
+                        val uri = Uri.parse(it)
+                        val scheme = uri.scheme?.lowercase()
+                        if (scheme != "https") {
+                            onError("Blocked insecure navigation: $scheme")
+                            return true
+                        }
                     }
-                    return super.shouldOverrideUrlLoading(view, url) // Let the WebView load the URL normally
+                    return super.shouldOverrideUrlLoading(view, url)
                 }
 
                 /**
                  * Called when a page finishes loading.
-                 * This can be used for initial loading or fallback checks, but should not be the primary
-                 * mechanism for success/failure callbacks from payment gateways due to redirects.
                  */
                 override fun onPageFinished(view: WebView?, pageUrl: String?) {
                     super.onPageFinished(view, pageUrl)
-                    // You can add additional checks here if the payment flow involves
-                    // JavaScript calls that set specific values that you can then read
-                    // using evaluateJavascript, but URL redirection is usually more reliable.
                 }
 
                 override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
@@ -77,7 +82,13 @@ fun CheckoutWebView(
                     onError("WebView error: $description (Code: $errorCode)")
                 }
 
-                // Add other overrides as needed, e.g., onReceivedSslError for SSL certificate issues.
+                /**
+                 * Handle SSL errors — never proceed past SSL errors in a payment context.
+                 */
+                override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                    handler?.cancel()
+                    onError("SSL certificate error. Connection refused for security.")
+                }
             }
             loadUrl(url)
         }
