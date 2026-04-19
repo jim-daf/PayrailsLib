@@ -6,6 +6,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.viewinterop.AndroidView
+import android.annotation.SuppressLint
 
 /**
  * A Composable function that displays a WebView for handling checkout processes.
@@ -28,6 +29,7 @@ fun CheckoutWebView(
 ) {
     AndroidView(factory = { context ->
         WebView(context).apply {
+            @SuppressLint("SetJavaScriptEnabled")
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true // Often needed for modern web apps
             settings.setSupportMultipleWindows(true) // If redirects open new windows
